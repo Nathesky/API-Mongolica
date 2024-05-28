@@ -1,8 +1,41 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 
 //Criar o app
 const app = express();
+
+// Criando frunção p/ criptografar senhas
+const cipher = {
+    algorithm: "aes256",
+    secret: "chaves",
+    type: "hex"
+}
+
+async function getCrypto(password){
+    return new Promise((resolve, reject) => {
+        const cipherStream = crypto.createCipher(cipher.algorithm, cipher.secret);
+        let encryptedData = '';
+
+        cipherStream.on('readable', () =>{
+            let chunk;
+            while (null !== (chunk = cipherStream.read())){
+                encryptedData += chunk.toString(cipher.type);
+            }
+        });
+
+        cipherStream.on('end', ()=>{
+            resolve(encryptedData);
+        });
+
+        cipherStream.on('error', (error)=>{
+            reject(error);
+        });
+
+        cipherStream.write(password);
+        cipherStream.end();
+    })
+}
 
 //Configurar a API para ler json
 app.use(express.urlencoded({
@@ -35,28 +68,40 @@ app.use(
 
 app.use(express.json());
 
-//Rotas 
-app.post('/person', async (req, res) => {
-    const { name, salary, approved } = req.body;
-
-    const person = {
-        name,
-        salary,
-        approved,
+app.post('/login', async (req, res) =>{
+    let {email, pass} = req.body;
+    try{
+        let encryptedPass = await getCrypto(pass);
+        const person = await Person.findOne({ email, pass: encryptedPass});
+        if(!person){
+            res.status(422).json({message: 'Credenciais inválidas'});
+            return;
+        }
+        res.status(200).json({message: 'Usuário logado', user: person});
+    } catch(error){
+        res.status(500).json({error: error.message});
     }
-
-//C do crud
-
-try{
-    await Person.create(person)
-    res.status(201).json({message: 'Pessoa cadastrada!!!'})
-} catch (error){
-    res.status(500).json({erro: error})
-}
 })
 
-//R do crud
+//Rotas 
+app.post('/person', async (req, res) => {
+    let { email, pass } = req.body;
 
+    //C do crud
+    try{
+        let newPass = await getCrypto(pass);
+        const person = {
+            email,
+            pass: newPass
+        };
+        await Person.create(person);
+        res.status(201).json({message: 'Pessoa cadastrada no sys com sucesso'});
+    } catch(error){
+        res.status(500).json({erro: error});
+    }
+});
+
+//R do crud
 app.get('/person', async (req, res) =>{
     try{
         const people = await Person.find();
@@ -84,12 +129,11 @@ app.get('/person/:id', async (req, res) =>{
 
 //U do crud
 app.patch('/person/:id', async (req, res) =>{
-    const { name, salary,approved } = req.body;
+    const { email, pass } = req.body;
     const id = req.params.id;
     const person = {
-        name,
-        salary,
-        approved
+        email,
+        pass
     }
 
     try{
